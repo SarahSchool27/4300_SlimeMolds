@@ -1,0 +1,23 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"chat.agent.enabled": false,
+		
+		
+		"workbench.colorTheme": "Quiet Light",
+		"workbench.colorCustomizations": {
+			"[Quiet Light]": {
+				"sideBar.background": "#f1e7d8",
+				"titleBar.inactiveBackground" : "#e9b450",
+				"titleBar.activeBackground" : "#e9b450",
+				"statusBar.background" : "#6c0931",
+				"activityBar.activeBackground" : "#e9b450",
+				"activityBar.foreground" : "#ff0066",
+			}
+		}
+	}
+}
