@@ -9,7 +9,8 @@ const NUM_AGENTS       = 4096*1000,
       DISPATCH_COUNT   = [ dc,dc, 1 ],
       DISPATCH_COUNT_2 = [ Math.ceil(W/8), Math.ceil(H/8), 1 ],
       LEFT = .0, RIGHT = 1.,
-      FADE = .0125
+      FADE = .0125,
+      NUM_PHEROMONE_CHANNELS = 2;
 
 const render_shader = seagulls.constants.vertex + `
 @group(0) @binding(0) var<uniform> frame: f32;
@@ -20,17 +21,27 @@ const render_shader = seagulls.constants.vertex + `
 fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   let grid_pos = floor( pos.xy / ${GRID_SIZE}.);
   
-  let pidx = grid_pos.y  * ${W}. + grid_pos.x;
-  let p = pheromones[ u32(pidx) ];
+  let pidx = (grid_pos.y  * ${W}. + grid_pos.x) * ${NUM_PHEROMONE_CHANNELS};
+  let p0 = pheromones[ u32(pidx)];
+  let p1 = pheromones[ u32(pidx)  +1];
+  //let p2 = pheromones[ u32(pidx ) +2 ];
+  //let p3 = pheromones[ u32(pidx)  +3];
 
-  return vec4f( vec3(p*10.),1. );
+  let slime_0 = clamp(p0*10.0, 0.0,1.0); //p* value effects how much you see in the render
+  let slime_1 = clamp(p1*10.0, 0.0,1.0);
+
+  return vec4f(slime_0, slime_1, 0., 1. );  
 }`
 
+
+/*The compute shader is running through the agents (Vants)
+Position is a float 32 in grid units. (value between 0 and W, 0 and H)
+*/
 const compute_shader =`
 struct Vant {
   pos: vec2f,
   dir: f32,
-  mode: f32 // not used
+  mode: f32 
 }
 
 @group(0) @binding(0) var<uniform> frame: f32;
@@ -42,33 +53,44 @@ fn vantIndex( cell:vec3u, size:vec3u ) -> u32 {
   return cell.x + (cell.y * size.x); 
 }
 
-fn pheromoneIndex( vant_pos: vec2f ) -> u32 {
-  return u32( round(vant_pos.y * ${W}. + vant_pos.x) );
+fn pheromoneIndex( vant_pos: vec2f , vant_mode : f32) -> u32 {
+  return u32(round(vant_pos.y)* ${W}. + round(vant_pos.x)) * ${NUM_PHEROMONE_CHANNELS} + u32(vant_mode);
 }
 
-fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f ) -> f32 {
+fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32) -> f32 {
   let read_dir = vec2f( sin( (dir+angle) * ${Math.PI*2} ), cos( (dir+angle) * ${Math.PI*2} ) );
   let offset = read_dir * distance;
-  let index = pheromoneIndex( round(pos+offset) );
-  return pheromones_r[ index ];
+
+  let index = pheromoneIndex( round(pos+offset) , 0); //zero since were going to go through all of them
+
+  var pheromoneScore : f32 = 0;
+  for( var i : u32 = 0; i <  ${NUM_PHEROMONE_CHANNELS} ; i++){
+    if (u32(vant_mode) == i){
+      pheromoneScore += pheromones_r[index+i];
+    }else{
+      pheromoneScore -= pheromones_r[index+i];
+    }
+  }
+  return pheromoneScore;
+
 }
 
 @compute
 @workgroup_size(${WORKGROUP_SIZE}, ${WORKGROUP_SIZE},1)
 
 fn cs(@builtin(global_invocation_id) cell:vec3u, @builtin(num_workgroups) size:vec3u)  {
-  let turn = .0625*2.0;
+  let turn = .0625 *1.5;
   let index = vantIndex( cell, size );
   var vant:Vant = vants[ index ];
 
-  var pIndex:u32 = pheromoneIndex( round(vant.pos) );
+  var pIndex:u32 = pheromoneIndex( round(vant.pos) , vant.mode);
 
   let sensorDistance = vec2f(7.,7.);
 
   //sense nearby pheromones
-  let left     = readSensor( vant.pos, vant.dir, -turn, sensorDistance );
-  let forward  = readSensor( vant.pos, vant.dir, 0.,    sensorDistance );
-  let right    = readSensor( vant.pos, vant.dir, turn,  sensorDistance );
+  let left     = readSensor( vant.pos, vant.dir, -turn, sensorDistance , vant.mode);
+  let forward  = readSensor( vant.pos, vant.dir, 0.,    sensorDistance , vant.mode);
+  let right    = readSensor( vant.pos, vant.dir, turn,  sensorDistance , vant.mode);
   
   if( left > forward && left > right ) {
     vant.dir -= turn; 
@@ -85,8 +107,9 @@ fn cs(@builtin(global_invocation_id) cell:vec3u, @builtin(num_workgroups) size:v
   
   let advance_dir = vec2f( sin( vant.dir * ${Math.PI*2} ), cos( vant.dir * ${Math.PI*2} ) );
   vant.pos = vant.pos + advance_dir; 
-  pIndex = pheromoneIndex( round(vant.pos) );
 
+  //write to value
+  pIndex = pheromoneIndex( round(vant.pos), vant.mode);
   pheromones_w[ pIndex ] = min(1.0, pheromones_w[pIndex]+0.1);
 
   vants[ index ] = vant;
@@ -97,8 +120,8 @@ const diffuse_shader = `
 @group(0) @binding(1) var<storage> pheromones: array<f32>;
 @group(0) @binding(2) var<storage, read_write> pheromones_write: array<f32>;
 
-fn getP( x:u32,y:u32 ) -> f32 {
-  let idx = u32( y * ${W}u + x );
+fn getP( x:u32,y:u32, vant_mode : f32 ) -> f32 {
+  let idx = u32( y * ${W}u + x )* ${NUM_PHEROMONE_CHANNELS} + u32(vant_mode);
   return pheromones[ idx ];
 }
 
@@ -109,34 +132,46 @@ fn cs(@builtin(global_invocation_id) cell:vec3u)  {
   let x = cell.x;
   let y = cell.y;
 
-  var state:f32 = getP( x,y ) * -1.; // this mult should equal the total of the others
-  state += getP(x - 1u, y) * 0.2;
-  state += getP(x - 1u, y - 1u) * 0.05;
-  state += getP(x, y - 1u) * 0.2;
-  state += getP(x + 1u, y - 1u ) * 0.05;
-  state += getP(x + 1u, y) * 0.2;
-  state += getP(x + 1u, y + 1u ) * 0.05;
-  state += getP(x, y + 1u ) * 0.2;
-  state += getP(x - 1u, y + 1u ) * 0.05;
+  for(var m :f32 = 0.0; m <${NUM_PHEROMONE_CHANNELS}; m+= 1.0){
+    var state:f32 = getP( x,y,m) * -1.; // this mult should equal the total of the others
+    state += getP(x - 1u,   y         ,m) * 0.2;
+    state += getP(x - 1u,   y - 1u    ,m) * 0.05;
+    state += getP(x,        y - 1u    ,m) * 0.2;
+    state += getP(x + 1u,   y - 1u    ,m) * 0.05;
+    state += getP(x + 1u,   y         ,m) * 0.2;
+    state += getP(x + 1u,   y + 1u    ,m) * 0.05;
+    state += getP(x,        y + 1u    ,m) * 0.2;
+    state += getP(x - 1u,   y + 1u    ,m) * 0.05;
 
-  let pIndex = y * ${W}u + x;
-  pheromones_write[ pIndex ] = max(0.,state*.99);
+    let pIndex =(y * ${W}u + x)* ${NUM_PHEROMONE_CHANNELS} + u32(m);
+    pheromones_write[ pIndex ] = max(0.,state*.999);
+  }
 }
 `
 
 const sg = await seagulls.init()
 
+//make buffer float array
+const testArray = new Float32Array( W*H * NUM_PHEROMONE_CHANNELS);
+for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
+  testArray[i] = 0;
+  testArray[i] = 0;
+}
+
 const NUM_PROPERTIES = 4 // must be evenly divisble by 4!
-const pheromones_b   = sg.buffer( new Float32Array( W*H ) ) // pheromones data
-const pheromonesPP_b = sg.buffer( new Float32Array( W*H ))  // pingpong buffer
+const pheromones_b   = sg.buffer( testArray) // pheromones data
+const pheromonesPP_b = sg.buffer( testArray)  // pingpong buffer
 const vants          = new Float32Array( NUM_AGENTS * NUM_PROPERTIES ) // hold vant info
 const pingpong       = sg.pingpong( pheromones_b, pheromonesPP_b )
 
 for( let i = 0; i < NUM_AGENTS * NUM_PROPERTIES; i+= NUM_PROPERTIES ) {
-  vants[ i ]   = W/2
-  vants[ i+1 ] = H/2
-  vants[ i+2 ] = Math.random()
+  vants[ i ]   = W/2 //positon x
+  vants[ i+1 ] = H/2 //piosition y 
+  vants[ i+2 ] = Math.random() //direction
+  vants[i + 3] = Math.floor(Math.random()*2); //vant_mode
 }
+
+
 
 const vants_b = sg.buffer( vants )
 const frame = sg.uniform( 0 )
@@ -166,4 +201,4 @@ const diffuse = sg.compute({
   dispatchCount: DISPATCH_COUNT_2 
 })
 
-sg.run( diffuse, compute, render )
+sg.run(diffuse, compute, render )
