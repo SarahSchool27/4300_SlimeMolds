@@ -9,8 +9,16 @@ const NUM_AGENTS       = 4096*1000,
       DISPATCH_COUNT   = [ dc,dc, 1 ],
       DISPATCH_COUNT_2 = [ Math.ceil(W/8), Math.ceil(H/8), 1 ],
       LEFT = .0, RIGHT = 1.,
-      FADE = .0125,
-      NUM_PHEROMONE_CHANNELS = 3;
+      FADE = .0125, //Is this being used?
+      NUM_PHEROMONE_CHANNELS = 3,
+      NUM_PROPERTIES_TYPEDESC = 8; //must be evenly devisable by 4 again, so we align to 16 bytes
+
+
+const InteractionTypeENUM = {
+    IGNORE: 0.0,
+    AVOID: 1.0,
+    FOLLOW: 2.0,
+};
 
 const render_shader = seagulls.constants.vertex + `
 @group(0) @binding(0) var<uniform> frame: f32;
@@ -45,10 +53,22 @@ struct Vant {
   mode: f32 
 }
 
+struct TypeDesc{
+  turn_radius : f32, //turn radius
+  diffuse_strength :f32, //diffuse strength
+  scanx : f32, //scan ahead X
+  scany :f32, //scan ahead Y
+  reaction_type :f32, //reaction type. 
+  colorR: f32, //color will be used in the fragment shader
+  colorG :f32,
+  colorB: f32
+}
+
 @group(0) @binding(0) var<uniform> frame: f32;
 @group(0) @binding(1) var<storage, read_write> vants: array<Vant>;
 @group(0) @binding(2) var<storage> pheromones_r: array<f32>;
 @group(0) @binding(3) var<storage, read_write> pheromones_w: array<f32>;
+@group(0) @binding(4) var<storage, read_write> type_desc_b: array<TypeDesc>;
 
 fn vantIndex( cell:vec3u, size:vec3u ) -> u32 {
   return cell.x + (cell.y * size.x); 
@@ -58,7 +78,11 @@ fn pheromoneIndex( vant_pos: vec2f , vant_mode : f32) -> u32 {
   return u32(round(vant_pos.y)* ${W}. + round(vant_pos.x)) * ${NUM_PHEROMONE_CHANNELS} + u32(vant_mode);
 }
 
-fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32) -> f32 {
+fn typedescIndex(vant_mode :f32)-> u32{
+    return u32(${NUM_PROPERTIES_TYPEDESC}) * u32(vant_mode);
+}
+
+fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32, type_desc : TypeDesc) -> f32 {
   let read_dir = vec2f( sin( (dir+angle) * ${Math.PI*2} ), cos( (dir+angle) * ${Math.PI*2} ) );
   let offset = read_dir * distance;
 
@@ -69,17 +93,16 @@ fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32) -
     if (u32(vant_mode) == i){
       pheromoneScore += pheromones_r[index+i];
     }else{
-      pheromoneScore -= pheromones_r[index+i];
-      
-      /*//options to experiment with
-      if(vant_mode == 1){
-        //do nothing
-      }else if(vant_mode == 3){
-        pheromoneScore -= pheromones_r[index+i]*10.0;
-      }else{
+      if(${InteractionTypeENUM.IGNORE} == type_desc.reaction_type ){
+        // no chanve
+      }
+      else if(${InteractionTypeENUM.AVOID} == type_desc.reaction_type ){
         pheromoneScore -= pheromones_r[index+i];
       }
-      */
+      else if(${InteractionTypeENUM.FOLLOW} == type_desc.reaction_type ){
+        pheromoneScore += pheromones_r[index+i];
+      }
+      
     }
   }
   return pheromoneScore;
@@ -89,19 +112,25 @@ fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32) -
 @workgroup_size(${WORKGROUP_SIZE}, ${WORKGROUP_SIZE},1)
 
 fn cs(@builtin(global_invocation_id) cell:vec3u, @builtin(num_workgroups) size:vec3u)  {
-  let turn = .0625 *1.5;
+  //get vant
   let index = vantIndex( cell, size );
   var vant:Vant = vants[ index ];
+  
+  //get vant type description
+  let desc_index = typedescIndex(vant.mode);
+  var type_desc : TypeDesc = type_desc_b[desc_index];
 
+  //variables
+  let turn = type_desc.turn_radius;
   var pIndex:u32 = pheromoneIndex( round(vant.pos) , vant.mode);
-
-  let sensorDistance = vec2f(7.,7.);
+  let sensorDistance = vec2f(type_desc.scanx,type_desc.scany);
 
   //sense nearby pheromones
-  let left     = readSensor( vant.pos, vant.dir, -turn, sensorDistance , vant.mode);
-  let forward  = readSensor( vant.pos, vant.dir, 0.,    sensorDistance , vant.mode);
-  let right    = readSensor( vant.pos, vant.dir, turn,  sensorDistance , vant.mode);
+  let left     = readSensor( vant.pos, vant.dir, -turn, sensorDistance , vant.mode, type_desc);
+  let forward  = readSensor( vant.pos, vant.dir, 0.,    sensorDistance , vant.mode, type_desc);
+  let right    = readSensor( vant.pos, vant.dir, turn,  sensorDistance , vant.mode, type_desc);
   
+  //movement logic based on sensor readings
   if( left > forward && left > right ) {
     vant.dir -= turn; 
   }else if( right > left && right > forward ) { 
@@ -123,6 +152,7 @@ fn cs(@builtin(global_invocation_id) cell:vec3u, @builtin(num_workgroups) size:v
   pheromones_w[ pIndex ] = min(1.0, pheromones_w[pIndex]+0.1);
 
   vants[ index ] = vant;
+
 }`
 
 const diffuse_shader = `
@@ -169,21 +199,44 @@ for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
   testArray[i] = 0;
 }
 
-const NUM_PROPERTIES = 4 // must be evenly divisble by 4!
+//make vant type variables
+const type_desc_vars = new Float32Array(NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC);
+
+for( let i = 0; i < NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC; i+= NUM_PROPERTIES_TYPEDESC) {
+  type_desc_vars[i ]   = .0625 *1.5 //turn radius
+  type_desc_vars[i +1 ] = 0.99  //diffuse strength
+  type_desc_vars[i +2 ] = 7. //scan ahead X
+  type_desc_vars[i + 3] = 7. //scan ahead Y
+  type_desc_vars[i + 4] = InteractionTypeENUM.FOLLOW //reaction type. 
+                  /*
+                  0: ignore
+                  1: avoid
+                  2: follow
+                  3: 
+                  */
+  type_desc_vars[i+ 5] = 0.  //color r
+  type_desc_vars[i+ 6 ] = 0.  //color g
+  type_desc_vars[i + 7] = 0.  //color b
+
+}
+
+console.log(type_desc_vars);
+
+//make pheromone and vant buffers
+const NUM_PROPERTIES_VANTS = 4 // must be evenly divisble by 4!
 const pheromones_b   = sg.buffer( testArray) // pheromones data
 const pheromonesPP_b = sg.buffer( testArray)  // pingpong buffer
-const vants          = new Float32Array( NUM_AGENTS * NUM_PROPERTIES ) // hold vant info
+const type_desc_b = sg.buffer(type_desc_vars) //vant type descriptions buffer
+const vants          = new Float32Array( NUM_AGENTS * NUM_PROPERTIES_VANTS ) // hold vant info
 const pingpong       = sg.pingpong( pheromones_b, pheromonesPP_b )
 const pingpong_swap  = sg.pingpong( pheromonesPP_b, pheromones_b) //an attempt to fix the pixelation
 
-for( let i = 0; i < NUM_AGENTS * NUM_PROPERTIES; i+= NUM_PROPERTIES ) {
+for( let i = 0; i < NUM_AGENTS * NUM_PROPERTIES_VANTS; i+= NUM_PROPERTIES_VANTS ) {
   vants[ i ]   = W/2 //positon x
-  vants[ i+1 ] = H/2 //piosition y 
+  vants[ i+1 ] = H/2 //piosition y
   vants[ i+2 ] = Math.random() //direction
   vants[i + 3] = Math.floor(Math.random()*NUM_PHEROMONE_CHANNELS); //vant_mode
 }
-
-
 
 const vants_b = sg.buffer( vants )
 const frame = sg.uniform( 0 )
@@ -199,7 +252,8 @@ const compute = sg.compute({
   data:[
     frame,
     vants_b,
-    pingpong
+    pingpong,
+    type_desc_b
   ],
   dispatchCount: DISPATCH_COUNT 
 })

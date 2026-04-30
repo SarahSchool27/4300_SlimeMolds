@@ -14,9 +14,11 @@
 				"sideBar.background": "#f1e7d8",
 				"titleBar.inactiveBackground" : "#e9b450",
 				"titleBar.activeBackground" : "#e9b450",
-				"statusBar.background" : "#6c0931",
+				"statusBar.background" : "#5d1b3e",
 				"activityBar.activeBackground" : "#e9b450",
-				"activityBar.foreground" : "#ff0066",
+				"activityBar.foreground" : "#db1977",
+				"editor.lineHighlightBackground" :"#fadde6",
+				
 			}
 		}
 	}
