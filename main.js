@@ -10,7 +10,7 @@ const NUM_AGENTS       = 4096*1000,
       DISPATCH_COUNT_2 = [ Math.ceil(W/8), Math.ceil(H/8), 1 ],
       LEFT = .0, RIGHT = 1.,
       FADE = .0125, //Is this being used?
-      NUM_PHEROMONE_CHANNELS = 1,
+      NUM_PHEROMONE_CHANNELS = 3,
       NUM_PROPERTIES_TYPEDESC = 8; //must be evenly devisable by 4 again, so we align to 16 bytes
 
 
@@ -48,9 +48,9 @@ fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   
   let pidx = (grid_pos.y  * ${W}. + grid_pos.x) * ${NUM_PHEROMONE_CHANNELS};
   let p0 = pheromones[ u32(pidx)];
-  let p1 = pheromones[ u32(pidx)  +1];
-  let p2 = pheromones[ u32(pidx ) +2 ];
-  //let p3 = pheromones[ u32(pidx)  +3];
+  let p1 = pheromones[ u32(pidx)   +1];
+  let p2 = pheromones[ u32(pidx)  +2];
+  
 
   let color1 = vec3f(type_desc_b[0].colorR);
 
@@ -58,7 +58,7 @@ fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   let slime_1 = clamp(p1*10.0, 0.0,1.0);
   let slime_2 = clamp(p2*10.0, 0.0,1.0);
 
-  return vec4f(color1, 1.);  
+  //return vec4f(slime_0,0.0,0.0, 1.);  
   return vec4f(slime_0, slime_1, slime_2, 1.);  
 }`
 
@@ -227,7 +227,7 @@ for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
 
 //Set up tweakpane USER TYPE DESC VARIABLES -----------------
   const PARAMS = {
-    turn_radius : .0625 *1.5,
+    turn_radius : .0625 *3.0,
     diffuse_strength : 0.99,
     scanx : 7.0,
     scany : 7.0,
@@ -249,7 +249,7 @@ for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
     type_desc_vars[i +1 ] = PARAMS.diffuse_strength  //diffuse strength
     type_desc_vars[i +2 ] = PARAMS.scanx //scan ahead X
     type_desc_vars[i + 3] = PARAMS.scany //scan ahead Y
-    type_desc_vars[i + 4] = InteractionTypeENUM.FOLLOW //reaction type. 
+    type_desc_vars[i + 4] = InteractionTypeENUM.AVOID //reaction type. 
                     /*
                     0: ignore
                     1: avoid
@@ -271,7 +271,7 @@ for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
     type_desc_vars[0] = PARAMS.turn_radius.toFixed(2);
     //type_desc_vars[8] = ev.value.toFixed(2);
     //type_desc_vars[16] = ev.value.toFixed(2);
-    type_desc_b.value = type_desc_vars;
+    type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
     console.log(type_desc_b.value);
   });
 

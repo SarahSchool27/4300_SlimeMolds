@@ -50,7 +50,7 @@ fn vs( @location(0) input : vec2f ) ->  @builtin(position) vec4f {
 const mult = navigator.userAgent.indexOf('Chrome') === -1 ? 4 : 1
 
 //let backTexture = null
-const gulls = {
+const seagulls = {
   isBroken:false,
   constants:CONSTANTS,
 
@@ -69,15 +69,15 @@ const gulls = {
     device.addEventListener("uncapturederror", event => {
       //console.error("A WebGPU error was not captured:", event.error)
       //throw event.error
-      gulls.isBroken = true
+      seagulls.isBroken = true
     })
 
 
     return device
   },
   
-  setupCanvas( device=null, canvas=null ) {
-    if( canvas === null ) canvas = document.getElementsByTagName('canvas')[0]
+  setupCanvas( device=null, fillScreen=true ) {
+    let canvas = document.getElementsByTagName('canvas')[0]
     if( canvas === null ) {
       console.error('could not find canvas to initialize gulls')
       return
@@ -94,12 +94,12 @@ const gulls = {
     })
 
     const devicePixelRatio = window.devicePixelRatio || 1
-    gulls.width  = canvas.width  = Math.floor(window.innerWidth ) // * devicePixelRatio)
-    gulls.height = canvas.height = Math.floor(window.innerHeight) //* devicePixelRatio)
-    canvas.style.height = gulls.height + 'px'
-    canvas.style.width  = gulls.width  + 'px'
-
-    //backTexture = gulls.createTexture( device, format, canvas )
+    if( fillScreen ) {
+      seagulls.width  = canvas.width  = Math.floor(window.innerWidth ) // * devicePixelRatio)
+      seagulls.height = canvas.height = Math.floor(window.innerHeight) //* devicePixelRatio)
+    }
+    canvas.style.height = seagulls.height + 'px'
+    canvas.style.width  = seagulls.width  + 'px'
 
     return [ canvas, context, format ]
   },
@@ -156,8 +156,8 @@ const gulls = {
     return buffer
   },
 
-  createUniformBuffer( device, values, label='seagull uniforms' ) {
-    const arr = new Float32Array(values)
+  createUniformBuffer( device, values, type=Float32Array, label='seagull uniforms' ) {
+    const arr = new type(values)
 
     const buff = device.createBuffer({
       label: label + (Math.round( Math.random() * 100000 )),
@@ -262,13 +262,13 @@ const gulls = {
 
         if( d.type === 'pingpong' ) {
           if( d.b.type === 'texture' ) d.b.type = 'storageTexture'
-          entries.push( gulls.createLayoutEntry( d.a, count++, type ) )
-          entries.push( gulls.createLayoutEntry( d.b, count++, type, 'storage' ) )
+          entries.push( seagulls.createLayoutEntry( d.a, count++, type ) )
+          entries.push( seagulls.createLayoutEntry( d.b, count++, type, 'storage' ) )
         }else{
           // TODO is it safe to assume that a buffer not included in a pingpong will always
           // be read/write as part of a compute shader?
           const mode = type === 'compute' ? 'storage' : 'read-only-storage'
-          entries.push( gulls.createLayoutEntry( d, count++, type, mode ) )
+          entries.push( seagulls.createLayoutEntry( d, count++, type, mode ) )
         }
       }
     }
@@ -338,14 +338,14 @@ const gulls = {
       for( let d of data ) {
         if( d.type === 'video' ) continue
         if( d.type !== 'pingpong' ) {
-          const entry = gulls.createRenderBindGroupEntry( d, count++ )
+          const entry = seagulls.createRenderBindGroupEntry( d, count++ )
           entriesA.push( entry )
           if( pingpong ) entriesB.push( entry )
         }else{
-          const a = gulls.createRenderBindGroupEntry( d.a, count ),
-                b = gulls.createRenderBindGroupEntry( d.b, count + 1 ),
-                a1= gulls.createRenderBindGroupEntry( d.a, count + 1 ),
-                b1= gulls.createRenderBindGroupEntry( d.b, count )
+          const a = seagulls.createRenderBindGroupEntry( d.a, count ),
+                b = seagulls.createRenderBindGroupEntry( d.b, count + 1 ),
+                a1= seagulls.createRenderBindGroupEntry( d.a, count + 1 ),
+                b1= seagulls.createRenderBindGroupEntry( d.b, count )
 
           entriesA.push( a, b  )
           entriesB.push( a1,b1 )
@@ -378,7 +378,7 @@ const gulls = {
     return bindGroups
   },
 
-  async createRenderPipeline( device, code, presentationFormat, vertexBufferLayout, bindGroupLayout, data, shouldBlend=false ) {
+  async createRenderPipeline( device, code, presentationFormat, vertexBufferLayout=null, bindGroupLayout, data, shouldBlend=false ) {
     const module = device.createShaderModule({
       label: 'main render',
       code
@@ -421,17 +421,17 @@ const gulls = {
       bindGroupLayouts
     })
 
+    const vertexLayout = { module }
+    if( vertexBufferLayout !== null ) {
+      vertexLayout.buffers = [ vertexBufferLayout ]
+    }
+
     const pipeline = device.createRenderPipeline({
       label: "render pipeline",
       layout:pipelineLayout,
-      vertex: {
-        module,
-        entryPoint: "vs",
-        buffers: [vertexBufferLayout]
-      },
+      vertex: vertexLayout,
       fragment: {
         module,
-        entryPoint: "fs",
         targets: [{
           format: presentationFormat,
           blend: shouldBlend ? CONSTANTS.blend : undefined
@@ -448,22 +448,24 @@ const gulls = {
           blend  = props.blend
 
     const vertices = props.vertices
-    const [vertexBuffer, vertexBufferLayout] = gulls.createVertexBuffer2D( device, vertices )
+    let vertexBuffer, vertexBufferLayout
+    if( typeof vertices !== 'number' ) 
+      [vertexBuffer, vertexBufferLayout] = seagulls.createVertexBuffer2D( device, vertices )
 
-    const renderLayout = gulls.createBindGroupLayout( device, props.data )
+    const renderLayout = seagulls.createBindGroupLayout( device, props.data )
 
     // check all entries to see if any need to pingpong
     let shouldPingPong = false
     if( props.data !== null )
       shouldPingPong = props.data.reduce( (a,v) => a + (v.type === 'pingpong' ? 1 : 0), 0 )
 
-    const bindGroups = gulls.createBindGroups( device, renderLayout, props.data, shouldPingPong )
+    const bindGroups = seagulls.createBindGroups( device, renderLayout, props.data, shouldPingPong )
 
     let textures = []
     if( props.data !== null )
       textures   = props.data.filter( d => d.type === 'texture' )
 
-    const pipeline   = await gulls.createRenderPipeline( 
+    const pipeline   = await seagulls.createRenderPipeline( 
       device, 
       shader, 
       presentationFormat, 
@@ -485,8 +487,8 @@ const gulls = {
     if( data !== null )
       shouldPingPong = !!data.reduce( (a,v) => a + (v.type === 'pingpong' ? 1 : 0), 0 )
 
-    let simLayout     = gulls.createBindGroupLayout( device, data, 'compute', 'compute layout' ) 
-    const simBindGroups = gulls.createBindGroups( device, simLayout, data, shouldPingPong, 'compute' ) 
+    let simLayout     = seagulls.createBindGroupLayout( device, data, 'compute', 'compute layout' ) 
+    const simBindGroups = seagulls.createBindGroups( device, simLayout, data, shouldPingPong, 'compute' ) 
 
     const videos = data !== null ? data.filter( d => d.type === 'video' ) : null
     const hasExternalTexture = videos !== null && videos.length > 0 
@@ -507,7 +509,7 @@ const gulls = {
     }
 
    
-    const simPipeline   = gulls.createSimulationPipeline( device, simLayout, computeShader )
+    const simPipeline   = seagulls.createSimulationPipeline( device, simLayout, computeShader )
 
     return [ simPipeline, simBindGroups ]
   },
@@ -532,7 +534,7 @@ const gulls = {
         }]
       })
       
-      externalTextureBindGroup = gulls.getExternalVideo( pass, externalLayout, videos )
+      externalTextureBindGroup = seagulls.getExternalVideo( pass, externalLayout, videos )
     }
 
     for( let i = 0; i < pass.times; i++ ) {
@@ -595,6 +597,8 @@ const gulls = {
       }]
     }
     
+    const useVertexBuffer = typeof passDesc.vertices !== 'number'
+
     const videos   = passDesc.data !== null 
             ? passDesc.data.filter( d => d.type === 'video' ) 
             : null
@@ -614,9 +618,10 @@ const gulls = {
         }]
       })
       
-      externalTextureBindGroup = gulls.getExternalVideo( passDesc, externalLayout, videos )
+      externalTextureBindGroup = seagulls.getExternalVideo( passDesc, externalLayout, videos )
     }
-        // in case we want a backbuffer etc. eventually this should probably be
+    
+    // in case we want a backbuffer etc. eventually this should probably be
     // replaced with a more generic post-processing setup
     let swapChainTexture = null
     if( shouldCopy ) {
@@ -627,7 +632,8 @@ const gulls = {
     const pass = encoder.beginRenderPass( renderPassDescriptor )
     pass.setPipeline( passDesc.renderPipeline )
 
-    pass.setVertexBuffer( 0, passDesc.vertexBuffer )
+    if( useVertexBuffer )
+      pass.setVertexBuffer( 0, passDesc.vertexBuffer )
 
     // only switch bindgroups if pingpong is needed
     const bindGroupIndex = passDesc.shouldPingPong === true ? passDesc.step++ % 2 : 0
@@ -639,7 +645,7 @@ const gulls = {
     }
     
     // TODO: generalize to 3d
-    pass.draw(passDesc.vertices.length/2, passDesc.count )  
+    pass.draw( useVertexBuffer ? passDesc.vertices.length/2 : passDesc.vertices, passDesc.count )  
     pass.end()
 
     
@@ -647,21 +653,20 @@ const gulls = {
       encoder.copyTextureToTexture(
         { texture: swapChainTexture },
         { texture: passDesc.copy },
-        [ gulls.width, gulls.height ]
+        [ seagulls.width, seagulls.height ]
       )
-
     }
 
     return passDesc.step
   },
 
-  async init( ) {
-    const device = await gulls.getDevice()
+  async init( fillScreen=true ) {
+    const device = await seagulls.getDevice()
 
-    const [canvas, context, presentationFormat] = gulls.setupCanvas( device )
+    const [canvas, context, presentationFormat] = seagulls.setupCanvas( device, fillScreen )
     const view = context.getCurrentTexture().createView()
 
-    const instance = Object.create( gulls.proto )
+    const instance = Object.create( seagulls.proto )
     Object.assign( instance, { 
       canvas, 
       context, 
@@ -674,8 +679,8 @@ const gulls = {
       times:      1,
       clearColor: [0,0,0,1],
       shouldUseBackBuffer:true,
-      width:  gulls.width,
-      height: gulls.height,
+      width:  seagulls.width,
+      height: seagulls.height,
       __blend: false,
       __computeStages: [],
       __textures:null
@@ -686,9 +691,9 @@ const gulls = {
   },
 
   proto: {
-    buffer( v, label='', type='float' ) {
-      const usage = v.usage !== undefined ? v.usage : CONSTANTS.defaultStorageFlags
-      const __buffer = gulls.createStorageBuffer( this.device, v, label, usage )
+    buffer( v, label='', usage=CONSTANTS.defaultStorageFlags ) {
+      //const usage = v.usage !== undefined ? v.usage : CONSTANTS.defaultStorageFlags
+      const __buffer = seagulls.createStorageBuffer( this.device, v, label, usage )
 
       const buffer = { type:'buffer', buffer:__buffer }
       buffer.clear = ()=> {
@@ -703,33 +708,52 @@ const gulls = {
         this.device.queue.writeBuffer(
           __buffer, 
           readStart, 
-          __buffer, 
+          buffer, 
           writeStart 
           //length === -1 ? __buffer.length * mult : length
         )
       }
 
-      buffer.read = async ( size=null, offset=0 ) => {
+      buffer.read = async ( size=null, offset=0, type=Float32Array ) => {
         const read = __buffer
         if( size === null ) size = read.size
 
-        await read.mapAsync(
+        const stagingBuffer = this.device.createBuffer({
+          size,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        })
+
+        // …
+
+        // Create GPUCommandEncoder to encode commands to issue to the GPU
+        const commandEncoder = this.device.createCommandEncoder();
+
+        // Copy output buffer to staging buffer
+        commandEncoder.copyBufferToBuffer(
+          __buffer,
+          stagingBuffer,
+        )
+
+        const copyCommands = commandEncoder.finish()
+        this.device.queue.submit([ copyCommands ])
+
+        await stagingBuffer.mapAsync(
           GPUMapMode.READ,
-          offset*4,
-          size*4
+          0,
+          size
         )
   
         let data = null
         try{
-          const copyArrayBuffer = read.getMappedRange( 0, size*4 )
+          const copyArrayBuffer = stagingBuffer.getMappedRange( 0, size )
           data = copyArrayBuffer.slice( 0 )
         }catch(e) {
-          read.unmap()
-          console.warn( 'error reading buffer with size:', size )
+          stagingBuffer.unmap()
+          console.warn( 'error reading buffer with size:', size, e )
         }
-        read.unmap()
+        stagingBuffer.unmap()
 
-        data = new Float32Array( data )
+        data = new type( data )
 
         //console.log( 'returned length:', data.length )
         return data 
@@ -772,20 +796,19 @@ const gulls = {
       return buffer
     },
 
-    uniform( __value, type='float' ) {
+    uniform( __value, type=Float32Array, label ) {
       const value = Array.isArray( __value ) ? __value : [ __value ]
-      const buffer = gulls.createUniformBuffer( this.device, value, type )
-      const storage = new Float32Array( value )
+      const buffer = seagulls.createUniformBuffer( this.device, value, type, label )
+      const storage = new type( value )
       const device = this.device
 
       if( Array.isArray( __value ) ) {
         buffer.value = {}
         for( let i = 0; i < value.length; i++ ) {
-          Object.defineProperty( buffer.value, i, {
+          Object.defineProperty( buffer, i, {
             set(v) {
               storage[ i ] = v
-              //device.queue.writeBuffer( buffer, i*4, storage, i*4, mult )
-              device.queue.writeBuffer( buffer, i*4, storage, i*4 )
+              device.queue.writeBuffer( buffer, i*4, storage, i, 1 )
             },
             get() {
               return storage[ i ]
@@ -853,7 +876,7 @@ const gulls = {
 
     pingpong( a,b ) {
       if( a.format !== b.format ) {
-        console.error( `gulls error: In order to pingpong textures the read texture must be specified as type rgba16float (e.g. sg.texture( tex, 'rgba16float' ); storageTextures use this format automatically`)
+        console.error( `seagulls error: In order to pingpong textures the read texture must be specified as type rgba16float (e.g. sg.texture( tex, 'rgba16float' ); storageTextures use this format automatically`)
       }
       return { type:'pingpong', a, b }
     },
@@ -871,37 +894,59 @@ const gulls = {
       return texture
     },
 
-    texture( tex, format=null, usage=GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING, type='texture' ) {
+    async image( url, flipY=false ) {
+      const res  = await fetch( url, { mode:'cors' }),
+            blob = await res.blob(),
+            tex  = await createImageBitmap(blob, { colorSpaceConversion: 'none' })
+
+      const texture = this.device.createTexture({
+        label: 'test',
+        format: 'rgba8unorm',
+        size: [tex.width, tex.height],
+        usage: GPUTextureUsage.TEXTURE_BINDING |
+          GPUTextureUsage.COPY_DST |
+          GPUTextureUsage.RENDER_ATTACHMENT,
+      })
+
+      this.device.queue.copyExternalImageToTexture(
+        { source:tex, flipY },
+        { texture },
+        { width:tex.width, height:tex.height }
+      )
+
+      // needed by seagulls to create bindgroup layout entry
+      texture.type = 'texture'
+
+      return texture
+    },
+
+    texture( tex, format=null, usage=GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.STORAGE_BINDING, type='texture', width=null, height=null ) {
       if( format === null ) format = CONSTANTS.textureFormat
 
       if( format === CONSTANTS.textureFormat ) usage = GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT 
 
-      const texture = gulls.createTexture( this.device, format, [this.width, this.height], usage )
+      const dims = width === null
+        ? [this.width, this.height]
+        : [width,height]
+
+      const texture = seagulls.createTexture( this.device, format, dims, usage )
       texture.type = type 
       texture.src = tex
       
       const numElements = this.width * this.height
       const numChannels = tex.byteLength / numElements
       const bytesPerElement = numChannels //* tex.BYTES_PER_ELEMENT
-      //console.log( numElements, numChannels, bytesPerElement )
-      
-      
+     
       this.device.queue.writeTexture(
         { texture }, 
         tex,
         { bytesPerRow: this.width * bytesPerElement, rowsPerImage: this.height }, 
         { width:this.width, height:this.height }
       )
-      /*this.device.queue.copyExternalImageToTexture(
-        { source:texture, flipY: true },
-        { texture },
-        { width: this.width, height: this.height },
-      )*/
-
+      
       return texture
     },
 
-    
     compute( args ) {
       const pass = {
         type:     'compute',
@@ -915,7 +960,7 @@ const gulls = {
 
       Object.assign( pass, args )
 
-      const [ simPipeline, simBindGroups ] = gulls.createSimulationStage( 
+      const [ simPipeline, simBindGroups ] = seagulls.createSimulationStage( 
         pass.device,
         pass.shader, 
         pass.data 
@@ -955,7 +1000,7 @@ const gulls = {
      
       if( pass.vertices === undefined ) pass.vertices = CONSTANTS.shapes.quad
 
-      const [renderPipeline, renderBindGroups, vertexBuffer] = await gulls.createRenderStage(
+      const [renderPipeline, renderBindGroups, vertexBuffer] = await seagulls.createRenderStage(
         this.device,
         pass,
         this.presentationFormat
@@ -976,7 +1021,7 @@ const gulls = {
 
     async run( ...passes ) {
       await this.once( ...passes ) 
-      //if( !gulls.isBroken )
+      //if( !seagulls.isBroken )
       window.requestAnimationFrame( async ()=> { await this.run( ...passes ) })
     },
 
@@ -986,7 +1031,7 @@ const gulls = {
     },
 
     async once( ...passes ) {
-      const encoder = this.device.createCommandEncoder({ label: 'gulls encoder' })
+      const encoder = this.device.createCommandEncoder({ label: 'seagulls encoder' })
       for( let pass of passes ) {
         try {
           if( typeof pass.onframe === 'function' ) await pass.onframe()
@@ -995,9 +1040,9 @@ const gulls = {
         }
 
         if( pass.type === 'render' ) {
-          pass.step = await gulls.render( encoder, pass )
+          pass.step = await seagulls.render( encoder, pass )
         }else if( pass.type === 'compute' ) {
-          pass.step = gulls.pingpong( encoder, pass )
+          pass.step = seagulls.pingpong( encoder, pass )
         }else if( pass.type === 'copy' ) {
           await encoder.copyBufferToBuffer(
             pass.src,    /* source buffer */
@@ -1021,4 +1066,4 @@ const gulls = {
   }
 }
 
-export default gulls
+export default seagulls
