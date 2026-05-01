@@ -10,7 +10,7 @@ const NUM_AGENTS       = 4096*1000,
       DISPATCH_COUNT_2 = [ Math.ceil(W/8), Math.ceil(H/8), 1 ],
       LEFT = .0, RIGHT = 1.,
       FADE = .0125, //Is this being used?
-      NUM_PHEROMONE_CHANNELS = 3,
+      NUM_PHEROMONE_CHANNELS = 1,
       NUM_PROPERTIES_TYPEDESC = 8; //must be evenly devisable by 4 again, so we align to 16 bytes
 
 
@@ -20,10 +20,27 @@ const InteractionTypeENUM = {
     FOLLOW: 2.0,
 };
 
+import {Pane} from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js'; //TODO make local
+        
+
+
 const render_shader = seagulls.constants.vertex + `
+struct TypeDesc{
+  turn_radius : f32, //turn radius
+  diffuse_strength :f32, //diffuse strength
+  scanx : f32, //scan ahead X
+  scany :f32, //scan ahead Y
+  reaction_type :f32, //reaction type. 
+  colorR: f32, //color will be used in the fragment shader
+  colorG :f32,
+  colorB: f32
+}
+
+
 @group(0) @binding(0) var<uniform> frame: f32;
 @group(0) @binding(1) var<storage> vants: array<f32>;
 @group(0) @binding(2) var<storage> pheromones: array<f32>;
+@group(0) @binding(3) var<storage> type_desc_b: array<TypeDesc>;
 
 @fragment 
 fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
@@ -35,10 +52,13 @@ fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   let p2 = pheromones[ u32(pidx ) +2 ];
   //let p3 = pheromones[ u32(pidx)  +3];
 
+  let color1 = vec3f(type_desc_b[0].colorR);
+
   let slime_0 = clamp(p0*10.0, 0.0,1.0); //p* value effects how much you see in the render
   let slime_1 = clamp(p1*10.0, 0.0,1.0);
   let slime_2 = clamp(p2*10.0, 0.0,1.0);
 
+  return vec4f(color1, 1.);  
   return vec4f(slime_0, slime_1, slime_2, 1.);  
 }`
 
@@ -199,34 +219,86 @@ for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
   testArray[i] = 0;
 }
 
-//make vant type variables
-const type_desc_vars = new Float32Array(NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC);
 
-for( let i = 0; i < NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC; i+= NUM_PROPERTIES_TYPEDESC) {
-  type_desc_vars[i ]   = .0625 *1.5 //turn radius
-  type_desc_vars[i +1 ] = 0.99  //diffuse strength
-  type_desc_vars[i +2 ] = 7. //scan ahead X
-  type_desc_vars[i + 3] = 7. //scan ahead Y
-  type_desc_vars[i + 4] = InteractionTypeENUM.FOLLOW //reaction type. 
-                  /*
-                  0: ignore
-                  1: avoid
-                  2: follow
-                  3: 
-                  */
-  type_desc_vars[i+ 5] = 0.  //color r
-  type_desc_vars[i+ 6 ] = 0.  //color g
-  type_desc_vars[i + 7] = 0.  //color b
 
-}
+//console.log(type_desc_vars);
 
-console.log(type_desc_vars);
+
+
+//Set up tweakpane USER TYPE DESC VARIABLES -----------------
+  const PARAMS = {
+    turn_radius : .0625 *1.5,
+    diffuse_strength : 0.99,
+    scanx : 7.0,
+    scany : 7.0,
+    reaction_type : InteractionTypeENUM.IGNORE,
+    colorx :0.2,
+
+  };
+
+
+  const pane = new Pane();
+
+
+  //make vant type variables
+  const type_desc_vars = new Float32Array(NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC);
+
+  //set buffer defaults
+  for( let i = 0; i < NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC; i+= NUM_PROPERTIES_TYPEDESC) {
+    type_desc_vars[i ]   = PARAMS.turn_radius //turn radius
+    type_desc_vars[i +1 ] = PARAMS.diffuse_strength  //diffuse strength
+    type_desc_vars[i +2 ] = PARAMS.scanx //scan ahead X
+    type_desc_vars[i + 3] = PARAMS.scany //scan ahead Y
+    type_desc_vars[i + 4] = InteractionTypeENUM.FOLLOW //reaction type. 
+                    /*
+                    0: ignore
+                    1: avoid
+                    2: follow
+                    3: 
+                    */
+    type_desc_vars[i+ 5] = PARAMS.colorx  //color r
+    type_desc_vars[i+ 6 ] = 0.  //color g
+    type_desc_vars[i + 7] = 0.  //color b
+
+  }
+
+  const type_desc_b = sg.buffer(type_desc_vars) //vant type descriptions buffer
+
+ 
+  //tweakplane bindings
+  pane.addBinding(PARAMS, 'turn_radius',  {min:0.0, max:1.0})  
+  .on('change', (ev) => {
+    type_desc_vars[0] = PARAMS.turn_radius.toFixed(2);
+    //type_desc_vars[8] = ev.value.toFixed(2);
+    //type_desc_vars[16] = ev.value.toFixed(2);
+    type_desc_b.value = type_desc_vars;
+    console.log(type_desc_b.value);
+  });
+
+  pane.addBinding(PARAMS, 'scanx',  {min:0.0, max:20.0})  
+  .on('change', (ev) => {
+    type_desc_vars[2] = ev.value.toFixed(2);
+    //type_desc_vars[10] = ev.value.toFixed(2);
+    //type_desc_vars[18] = ev.value.toFixed(2);
+    type_desc_b.value = type_desc_vars;
+    
+  });
+
+  pane.addBinding(PARAMS, 'colorx',  {min:0.0, max:1.0})  
+  .on('change', (ev) => {
+    type_desc_vars[5] = ev.value.toFixed(2);
+    
+    type_desc_b.value = type_desc_vars;
+  });
+ 
+//end tweakpane -----------------
+
+
 
 //make pheromone and vant buffers
 const NUM_PROPERTIES_VANTS = 4 // must be evenly divisble by 4!
 const pheromones_b   = sg.buffer( testArray) // pheromones data
 const pheromonesPP_b = sg.buffer( testArray)  // pingpong buffer
-const type_desc_b = sg.buffer(type_desc_vars) //vant type descriptions buffer
 const vants          = new Float32Array( NUM_AGENTS * NUM_PROPERTIES_VANTS ) // hold vant info
 const pingpong       = sg.pingpong( pheromones_b, pheromonesPP_b )
 const pingpong_swap  = sg.pingpong( pheromonesPP_b, pheromones_b) //an attempt to fix the pixelation
@@ -243,7 +315,7 @@ const frame = sg.uniform( 0 )
 
 const render = await sg.render({
   shader: render_shader,
-  data: [ frame, vants_b, pheromones_b ],
+  data: [ frame, vants_b, pheromones_b, type_desc_b ],
   onframe() { frame.value++ },
 })
 
