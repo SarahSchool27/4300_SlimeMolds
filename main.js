@@ -48,15 +48,15 @@ fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   
   let pidx = (grid_pos.y  * ${W}. + grid_pos.x) * ${NUM_PHEROMONE_CHANNELS};
   let p0 = pheromones[ u32(pidx)];
-  let p1 = pheromones[ u32(pidx)   +1];
+  let p1 = pheromones[ u32(pidx)  +1];
   let p2 = pheromones[ u32(pidx)  +2];
   
 
   let color1 = vec3f(type_desc_b[0].colorR);
 
-  let slime_0 = clamp(p0*10.0, 0.0,1.0); //p* value effects how much you see in the render
-  let slime_1 = clamp(p1*10.0, 0.0,1.0);
-  let slime_2 = clamp(p2*10.0, 0.0,1.0);
+  let slime_0 = clamp(p0*1.0, 0.0,1.0); //p* value effects how much you see in the render
+  let slime_1 = clamp(p1*1.0, 0.0,1.0);
+  let slime_2 = clamp(p2*1.0, 0.0,1.0);
 
   //return vec4f(slime_0,0.0,0.0, 1.);  
   return vec4f(slime_0, slime_1, slime_2, 1.);  
@@ -98,9 +98,6 @@ fn pheromoneIndex( vant_pos: vec2f , vant_mode : f32) -> u32 {
   return u32(round(vant_pos.y)* ${W}. + round(vant_pos.x)) * ${NUM_PHEROMONE_CHANNELS} + u32(vant_mode);
 }
 
-fn typedescIndex(vant_mode :f32)-> u32{
-    return u32(${NUM_PROPERTIES_TYPEDESC}) * u32(vant_mode);
-}
 
 fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32, type_desc : TypeDesc) -> f32 {
   let read_dir = vec2f( sin( (dir+angle) * ${Math.PI*2} ), cos( (dir+angle) * ${Math.PI*2} ) );
@@ -110,11 +107,11 @@ fn readSensor( pos:vec2f, dir:f32, angle:f32, distance:vec2f , vant_mode :f32, t
 
   var pheromoneScore : f32 = 0;
   for( var i : u32 = 0; i <  ${NUM_PHEROMONE_CHANNELS} ; i++){
-    if (u32(vant_mode) == i){
-      pheromoneScore += pheromones_r[index+i];
+    if (u32(vant_mode) == i){ //same type
+      pheromoneScore += pheromones_r[index+u32(vant_mode)]; //position and i's channel (the same channel as me)
     }else{
-      if(${InteractionTypeENUM.IGNORE} == type_desc.reaction_type ){
-        // no chanve
+      if(${InteractionTypeENUM.IGNORE} == u32(type_desc.reaction_type) ){
+        // no change
       }
       else if(${InteractionTypeENUM.AVOID} == type_desc.reaction_type ){
         pheromoneScore -= pheromones_r[index+i];
@@ -137,8 +134,7 @@ fn cs(@builtin(global_invocation_id) cell:vec3u, @builtin(num_workgroups) size:v
   var vant:Vant = vants[ index ];
   
   //get vant type description
-  let desc_index = typedescIndex(vant.mode);
-  var type_desc : TypeDesc = type_desc_b[desc_index];
+  var type_desc : TypeDesc = type_desc_b[u32(vant.mode)];
 
   //variables
   let turn = type_desc.turn_radius;
@@ -212,6 +208,7 @@ fn cs(@builtin(global_invocation_id) cell:vec3u)  {
 
 const sg = await seagulls.init()
 
+
 //make buffer float array
 const testArray = new Float32Array( W*H * NUM_PHEROMONE_CHANNELS);
 for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
@@ -223,74 +220,123 @@ for( let i = 0; i < NUM_PHEROMONE_CHANNELS * W* H; i++) {
 
 //console.log(type_desc_vars);
 
+//make an image
+const st = "rgba16float";
+const pheromone_text = sg.texture(testArray, st);
 
 
 //Set up tweakpane USER TYPE DESC VARIABLES -----------------
-  const PARAMS = {
-    turn_radius : .0625 *3.0,
+  const PARAMS = [{
+    turn_radius : .0625 *1.5,
     diffuse_strength : 0.99,
-    scanx : 7.0,
+    scanx: 7.0,
     scany : 7.0,
     reaction_type : InteractionTypeENUM.IGNORE,
-    colorx :0.2,
+  },{
+    turn_radius : .0625 *1.5,
+    diffuse_strength : 0.99,
+    scanx: 7.0,
+    scany : 7.0,
+    reaction_type : InteractionTypeENUM.IGNORE,
+  },{
+    turn_radius : .0625 *1.5,
+    diffuse_strength : 0.99,
+    scanx: 7.0,
+    scany : 7.0,
+    reaction_type : InteractionTypeENUM.IGNORE,
+  },
+];
+  
 
-  };
 
 
-  const pane = new Pane();
+  
 
 
   //make vant type variables
   const type_desc_vars = new Float32Array(NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC);
 
   //set buffer defaults
+  let typeIndex =  0; //aditional loop counter to get right type data out of PARAMS (0,2)
   for( let i = 0; i < NUM_PHEROMONE_CHANNELS * NUM_PROPERTIES_TYPEDESC; i+= NUM_PROPERTIES_TYPEDESC) {
-    type_desc_vars[i ]   = PARAMS.turn_radius //turn radius
-    type_desc_vars[i +1 ] = PARAMS.diffuse_strength  //diffuse strength
-    type_desc_vars[i +2 ] = PARAMS.scanx //scan ahead X
-    type_desc_vars[i + 3] = PARAMS.scany //scan ahead Y
-    type_desc_vars[i + 4] = InteractionTypeENUM.AVOID //reaction type. 
+    
+    type_desc_vars[i ]   = PARAMS[typeIndex].turn_radius //turn radius
+    type_desc_vars[i +1 ] = PARAMS[typeIndex].diffuse_strength  //diffuse strength
+    type_desc_vars[i +2 ] = PARAMS[typeIndex].scanx //scan ahead X
+    type_desc_vars[i + 3] = PARAMS[typeIndex].scany //scan ahead Y
+    type_desc_vars[i + 4] = PARAMS[typeIndex].reaction_type //reaction type. 
                     /*
                     0: ignore
                     1: avoid
                     2: follow
                     3: 
                     */
-    type_desc_vars[i+ 5] = PARAMS.colorx  //color r
+    type_desc_vars[i+ 5] = 0.  //color r
     type_desc_vars[i+ 6 ] = 0.  //color g
     type_desc_vars[i + 7] = 0.  //color b
 
+    typeIndex++;
   }
 
   const type_desc_b = sg.buffer(type_desc_vars) //vant type descriptions buffer
 
- 
-  //tweakplane bindings
-  pane.addBinding(PARAMS, 'turn_radius',  {min:0.0, max:1.0})  
-  .on('change', (ev) => {
-    type_desc_vars[0] = PARAMS.turn_radius.toFixed(2);
-    //type_desc_vars[8] = ev.value.toFixed(2);
-    //type_desc_vars[16] = ev.value.toFixed(2);
-    type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
-    console.log(type_desc_b.value);
-  });
+//tweakplane bindings
+  const pane = new Pane();
 
-  pane.addBinding(PARAMS, 'scanx',  {min:0.0, max:20.0})  
-  .on('change', (ev) => {
-    type_desc_vars[2] = ev.value.toFixed(2);
-    //type_desc_vars[10] = ev.value.toFixed(2);
-    //type_desc_vars[18] = ev.value.toFixed(2);
-    type_desc_b.value = type_desc_vars;
-    
-  });
+  //folders: one per slime.
+  const tw_folders = [
+      pane.addFolder({
+      title: "Slime Channel 1"
 
-  pane.addBinding(PARAMS, 'colorx',  {min:0.0, max:1.0})  
-  .on('change', (ev) => {
-    type_desc_vars[5] = ev.value.toFixed(2);
-    
-    type_desc_b.value = type_desc_vars;
-  });
- 
+    }),
+    pane.addFolder({
+      title: "Slime Channel 2"
+
+    }),
+    pane.addFolder({
+      title: "Slime Channel 3"
+
+    })];
+
+  for(let i = 0; i< NUM_PHEROMONE_CHANNELS; i++){
+    let bufferIndex = i*NUM_PROPERTIES_TYPEDESC;
+
+    tw_folders[i].addBinding(PARAMS[0], 'turn_radius',  {min:0.0, max:1.0})  
+    .on('change', (ev) => {
+      type_desc_vars[bufferIndex] = ev.value.toFixed(2);
+      type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
+      console.log(type_desc_vars);
+    });
+
+    tw_folders[i].addBinding(PARAMS[0], 'scanx',  {min:0.0, max:20.0})  
+    .on('change', (ev) => {
+      type_desc_vars[bufferIndex +2] = ev.value.toFixed(2);
+      type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
+      
+    });
+
+    tw_folders[i].addBinding(PARAMS[0], 'scany',  {min:0.0, max:20.0})  
+    .on('change', (ev) => {
+      type_desc_vars[bufferIndex + 3] = ev.value.toFixed(2);
+      type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
+      console.log(type_desc_vars);
+    });
+
+    tw_folders[i].addBinding(PARAMS[0], 'reaction_type',  {
+      options: {
+      IGNORE: 0.0,
+      AVOID: 1.0,
+      FOLLOW: 2.0
+      }
+    })  
+    .on('change', (ev) => {
+      type_desc_vars[bufferIndex+4] = ev.value.toFixed(2);
+      type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
+      
+    });
+  }
+
+
 //end tweakpane -----------------
 
 
@@ -310,6 +356,7 @@ for( let i = 0; i < NUM_AGENTS * NUM_PROPERTIES_VANTS; i+= NUM_PROPERTIES_VANTS 
   vants[i + 3] = Math.floor(Math.random()*NUM_PHEROMONE_CHANNELS); //vant_mode
 }
 
+
 const vants_b = sg.buffer( vants )
 const frame = sg.uniform( 0 )
 
@@ -325,7 +372,8 @@ const compute = sg.compute({
     frame,
     vants_b,
     pingpong,
-    type_desc_b
+    type_desc_b,
+    pheromone_text
   ],
   dispatchCount: DISPATCH_COUNT 
 })
