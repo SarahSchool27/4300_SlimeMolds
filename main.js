@@ -1,6 +1,6 @@
 import { default as seagulls } from './gulls/gulls.js'
 
-const NUM_AGENTS       = 4096*1000,
+const NUM_AGENTS       = 4096*2000,
       GRID_SIZE        = 1,
       W                = Math.round( window.innerWidth  / GRID_SIZE ),
       H                = Math.round( window.innerHeight / GRID_SIZE ),
@@ -47,7 +47,20 @@ fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   let grid_pos = floor( pos.xy / ${GRID_SIZE}.);
   
   let pidx = (grid_pos.y  * ${W}. + grid_pos.x) * ${NUM_PHEROMONE_CHANNELS};
-  let p0 = pheromones[ u32(pidx)];
+  var color : vec3f = vec3f(0.0);
+
+  for (var i :u32 = 0; i < ${NUM_PHEROMONE_CHANNELS}; i+=1){
+    let p = pheromones[u32(pidx) + i];
+    let currType = type_desc_b[i];
+    let pCol = vec3f(currType.colorR, currType.colorG, currType.colorB);
+    
+    color += vec3f(p) * pCol;
+  }
+  color = clamp(color, vec3f(0.0), vec3f(1.0));
+  return vec4f(color, 1.0);
+
+
+  /* let p0 = pheromones[ u32(pidx)];
   let p1 = pheromones[ u32(pidx)  +1];
   let p2 = pheromones[ u32(pidx)  +2];
   
@@ -59,7 +72,7 @@ fn fs( @builtin(position) pos : vec4f ) -> @location(0) vec4f {
   let slime_2 = clamp(p2*1.0, 0.0,1.0);
 
   //return vec4f(slime_0,0.0,0.0, 1.);  
-  return vec4f(slime_0, slime_1, slime_2, 1.);  
+  return vec4f(slime_0, slime_1, slime_2, 1.);  */
 }`
 
 
@@ -73,13 +86,13 @@ struct Vant {
   mode: f32 
 }
 
-struct TypeDesc{
+struct TypeDesc{ //tries to align to the largest type, so can't use vec3f for color
   turn_radius : f32, //turn radius
   diffuse_strength :f32, //diffuse strength
   scanx : f32, //scan ahead X
   scany :f32, //scan ahead Y
   reaction_type :f32, //reaction type. 
-  colorR: f32, //color will be used in the fragment shader
+  colorR: f32, //color will be used in the fragment shader 
   colorG :f32,
   colorB: f32
 }
@@ -232,24 +245,23 @@ const pheromone_text = sg.texture(testArray, st);
     scanx: 7.0,
     scany : 7.0,
     reaction_type : InteractionTypeENUM.IGNORE,
+    color: {r: 1., g: 0., b: 0.}
   },{
     turn_radius : .0625 *1.5,
     diffuse_strength : 0.99,
     scanx: 7.0,
     scany : 7.0,
     reaction_type : InteractionTypeENUM.IGNORE,
+    color: {r: 0., g: 1., b: 0.}
   },{
     turn_radius : .0625 *1.5,
     diffuse_strength : 0.99,
     scanx: 7.0,
     scany : 7.0,
     reaction_type : InteractionTypeENUM.IGNORE,
+    color: {r: 0., g: 0., b: 1.}
   },
 ];
-  
-
-
-
   
 
 
@@ -271,9 +283,9 @@ const pheromone_text = sg.texture(testArray, st);
                     2: follow
                     3: 
                     */
-    type_desc_vars[i+ 5] = 0.  //color r
-    type_desc_vars[i+ 6 ] = 0.  //color g
-    type_desc_vars[i + 7] = 0.  //color b
+    type_desc_vars[i+ 5] =  Object.values(PARAMS[typeIndex].color)[0]  //color r
+    type_desc_vars[i+ 6 ] =  Object.values(PARAMS[typeIndex].color)[1]   //color g
+    type_desc_vars[i+ 7] =  Object.values(PARAMS[typeIndex].color)[2]   //color b
 
     typeIndex++;
   }
@@ -301,28 +313,28 @@ const pheromone_text = sg.texture(testArray, st);
   for(let i = 0; i< NUM_PHEROMONE_CHANNELS; i++){
     let bufferIndex = i*NUM_PROPERTIES_TYPEDESC;
 
-    tw_folders[i].addBinding(PARAMS[0], 'turn_radius',  {min:0.0, max:1.0})  
+    tw_folders[i].addBinding(PARAMS[i], 'turn_radius',  {min:0.0, max:1.0})  
     .on('change', (ev) => {
       type_desc_vars[bufferIndex] = ev.value.toFixed(2);
       type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
-      console.log(type_desc_vars);
+      //console.log(type_desc_vars);
     });
 
-    tw_folders[i].addBinding(PARAMS[0], 'scanx',  {min:0.0, max:20.0})  
+    tw_folders[i].addBinding(PARAMS[i], 'scanx',  {min:0.0, max:20.0})  
     .on('change', (ev) => {
       type_desc_vars[bufferIndex +2] = ev.value.toFixed(2);
       type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
       
     });
 
-    tw_folders[i].addBinding(PARAMS[0], 'scany',  {min:0.0, max:20.0})  
+    tw_folders[i].addBinding(PARAMS[i], 'scany',  {min:0.0, max:20.0})  
     .on('change', (ev) => {
       type_desc_vars[bufferIndex + 3] = ev.value.toFixed(2);
       type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
-      console.log(type_desc_vars);
+      //console.log(type_desc_vars);
     });
 
-    tw_folders[i].addBinding(PARAMS[0], 'reaction_type',  {
+    tw_folders[i].addBinding(PARAMS[i], 'reaction_type',  {
       options: {
       IGNORE: 0.0,
       AVOID: 1.0,
@@ -334,6 +346,17 @@ const pheromone_text = sg.texture(testArray, st);
       type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
       
     });
+
+    tw_folders[i].addBinding(PARAMS[i], 'color', {color: {type: 'float'}}, {
+    })  
+    .on('change', (ev) => {
+      for(let colIn = 0; colIn < 3; colIn++){
+        type_desc_vars[bufferIndex + 5+colIn] = Object.values(PARAMS[i].color)[colIn];
+      }
+      type_desc_b.write(type_desc_vars, 0.0, 0.0, type_desc_vars.length);
+      //console.log(type_desc_vars);
+    });
+
   }
 
 
